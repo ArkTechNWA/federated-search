@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -16,6 +17,9 @@ from federation.plugins.base import BankPlugin
 from federation.types import BankConfig, BankStatus, FederatedResult
 
 logger = logging.getLogger(__name__)
+
+# Flex prepends a header like "[3 rows, ~712 tok]\n" before JSON
+_FLEX_HEADER_RE = re.compile(r"^\[\d+ rows?, ~[\d.]+ tok\]\n", re.MULTILINE)
 
 
 class FlexBankPlugin(BankPlugin):
@@ -35,8 +39,17 @@ class FlexBankPlugin(BankPlugin):
         for line in text.strip().splitlines():
             if line.startswith("data: "):
                 return json.loads(line[6:])
-        # Flex may return plain JSON in stateless mode
         return json.loads(text)
+
+    @staticmethod
+    def _strip_flex_header(text: str) -> str:
+        """Remove the '[N rows, ~M tok]' header flex prepends to results."""
+        return _FLEX_HEADER_RE.sub("", text, count=1).strip()
+
+    @staticmethod
+    def _clean_snippet(text: str) -> str:
+        """Remove flex's >>>highlight<<< markers from snippets."""
+        return text.replace(">>>", "").replace("<<<", "")
 
     async def _call_flex(self, query: str, cell: str | None = None) -> str:
         """Call flex_search and return the raw text result."""
@@ -48,14 +61,12 @@ class FlexBankPlugin(BankPlugin):
         elif self.config.cell:
             arguments["cell"] = self.config.cell
 
-        # Flex is stateless — no session init needed
-        # But we still need to initialize for MCP protocol compliance
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
 
-        # Initialize
+        # Initialize (flex is stateless but MCP protocol requires it)
         init_resp = await client.post(
             self.config.url,
             headers=headers,
@@ -76,14 +87,12 @@ class FlexBankPlugin(BankPlugin):
         if session_id:
             headers["mcp-session-id"] = session_id
 
-        # Initialized notification
         await client.post(
             self.config.url,
             headers=headers,
             json={"jsonrpc": "2.0", "method": "notifications/initialized"},
         )
 
-        # Call tool
         resp = await client.post(
             self.config.url,
             headers=headers,
@@ -102,11 +111,13 @@ class FlexBankPlugin(BankPlugin):
     async def search(self, query: str, limit: int = 10) -> list[FederatedResult]:
         cell = self.config.cell or "claude_code"
 
-        # Use keyword search for federated queries — most reliable for term matching
+        # Escape single quotes in query for SQL safety
+        safe_query = query.replace("'", "''")
+
         flex_query = (
             f"SELECT k.id, k.rank, k.snippet, c.session_id, c.position, "
             f"substr(c.content, 1, 300) AS preview "
-            f"FROM keyword('{query}', 'SELECT id FROM chunks') k "
+            f"FROM keyword('{safe_query}', 'SELECT id FROM chunks') k "
             f"JOIN chunks c ON c.id = k.id "
             f"LIMIT {limit}"
         )
@@ -118,53 +129,60 @@ class FlexBankPlugin(BankPlugin):
             self._status = BankStatus.DEGRADED
             return []
 
+        # Strip the "[N rows, ~M tok]" header and parse JSON array
+        json_text = self._strip_flex_header(raw)
+
+        if not json_text or json_text.startswith("{\"error"):
+            # Empty results or error response
+            if "error" in json_text:
+                logger.warning("Flex returned error: %s", json_text[:200])
+                self._status = BankStatus.DEGRADED
+            return []
+
         results: list[FederatedResult] = []
-        # Flex returns tabular text — parse what we can
-        # The raw result is text output from SQLite, format varies
-        # We'll treat it as contextual search results
-        lines = raw.strip().split("\n") if raw.strip() else []
-
-        if not lines:
-            return results
-
-        # Try to parse as structured data if it's JSON-like
         try:
-            parsed_rows = json.loads(raw)
-            if isinstance(parsed_rows, list):
-                for i, row in enumerate(parsed_rows[:limit]):
-                    results.append(FederatedResult(
-                        bank=self.id,
-                        bank_label=self.config.label,
-                        source_type="chunk",
-                        title=f"Session {row.get('session_id', 'unknown')}",
-                        snippet=row.get("preview", row.get("snippet", str(row)[:200])),
-                        relevance=max(0.1, 1.0 - (i * 0.1)),
-                        priority=self.config.priority,
-                        drill=f"@full id={row.get('id', '?')}",
-                        metadata={
-                            "cell": cell,
-                            "session_id": row.get("session_id"),
-                            "position": row.get("position"),
-                            "rank": row.get("rank"),
-                        },
-                    ))
-                self._status = BankStatus.HEALTHY
-                return results
-        except (json.JSONDecodeError, TypeError):
-            pass
+            rows = json.loads(json_text)
+            if not isinstance(rows, list):
+                rows = [rows]
+        except json.JSONDecodeError:
+            logger.warning("Could not parse flex response as JSON: %s", json_text[:200])
+            return []
 
-        # Fallback: treat the entire response as a single contextual result
-        results.append(FederatedResult(
-            bank=self.id,
-            bank_label=self.config.label,
-            source_type="chunk",
-            title=f"Flex results ({cell})",
-            snippet=raw[:500],
-            relevance=0.5,
-            priority=self.config.priority,
-            drill=f"flex_search query in cell '{cell}'",
-            metadata={"cell": cell, "raw_length": len(raw)},
-        ))
+        # Deduplicate by session — keep highest-ranked chunk per session
+        seen_sessions: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            sid = row.get("session_id", "unknown")
+            if sid not in seen_sessions or row.get("rank", 0) > seen_sessions[sid].get("rank", 0):
+                seen_sessions[sid] = row
+
+        for i, row in enumerate(seen_sessions.values()):
+            rank = row.get("rank", 0.5)
+            # Normalize rank to 0-1 range (flex ranks are typically 0-1 already)
+            relevance = min(1.0, max(0.1, float(rank)))
+
+            snippet = self._clean_snippet(
+                row.get("snippet", row.get("preview", ""))
+            )
+            session_id = row.get("session_id", "unknown")
+            chunk_id = row.get("id", "unknown")
+
+            results.append(FederatedResult(
+                bank=self.id,
+                bank_label=self.config.label,
+                source_type="chunk",
+                title=f"Session {session_id[:12]}...",
+                snippet=snippet[:300],
+                relevance=relevance,
+                priority=self.config.priority,
+                drill=f"@full id={chunk_id}",
+                metadata={
+                    "cell": cell,
+                    "session_id": session_id,
+                    "chunk_id": chunk_id,
+                    "position": row.get("position"),
+                    "rank": rank,
+                },
+            ))
 
         self._status = BankStatus.HEALTHY
         return results
