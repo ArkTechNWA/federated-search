@@ -1,0 +1,32 @@
+# Federation config — one file defines all bank routing
+# Priority order: lower number = higher priority in results
+
+agents:
+  johnny5:
+    port: 4001
+    banks:
+      - id: knowledge_graph
+        type: kg
+        label: "Curated Knowledge"
+        description: "Agent-curated structured knowledge graph"
+        priority: 1
+        default: true
+        url: "http://127.0.0.1:3101/mcp"
+        auth: "Bearer ${KG_AUTH_TOKEN}"
+      - id: flex
+        type: flex
+        label: "Session History"
+        description: "Raw session transcripts and tool calls"
+        priority: 2
+        default: true
+        url: "http://127.0.0.1:7135/mcp/"
+        cell: claude_code
+      - id: web
+        type: searxng
+        label: "Web Search"
+        description: "SearXNG metasearch with optional AI synthesis"
+        priority: 99
+        default: false
+        url: "http://100.100.2.147:8080"
+        synthesis: true
+        deepseek_api_key_env: "DEEPSEEK_API_KEY"

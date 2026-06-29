@@ -1,0 +1,24 @@
+[project]
+name = "federated-search"
+version = "0.1.0"
+description = "Federated memory search — one query, all knowledge"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.28.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+fed-search = "federation.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
