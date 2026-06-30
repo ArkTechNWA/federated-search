@@ -166,7 +166,9 @@ class KGBankPlugin(BankPlugin):
         return self._status
 
     async def initialize(self) -> None:
-        await self._create_session()
+        # Don't create session/client here. Init runs in a different event
+        # loop than FastMCP tool calls. Clients created lazily on first use.
+        pass
 
     async def shutdown(self) -> None:
         if self._client:
