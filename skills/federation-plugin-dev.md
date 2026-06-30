@@ -193,6 +193,28 @@ Access in code: `self.config.extra.get("calendar_id", "primary")`
 - Optional DeepSeek synthesis: separate API call with search results as context
 - Synthesis result inserted at position 0 as `source_type="synthesis"`
 
+## Tool Description Best Practice
+
+When your federation server is deployed, update the `fed_search` and `fed_banks` tool docstrings to include **examples that reference your actual registered banks**. The agent using the tools should see real bank IDs, not generic placeholders.
+
+For example, if your config registers `knowledge_graph`, `flex`, and `corp-wiki`:
+
+```python
+@mcp.tool()
+async def fed_search(query: str, db: str | None = None, ...) -> str:
+    """Search across all subscribed memory banks.
+
+    Args:
+        query: What to search for.
+        db: Optional. Bank ID or comma-separated bank IDs to search.
+              Omit to search all default banks.
+              Example: db="knowledge_graph" or db="flex,corp-wiki"
+        ...
+    """
+```
+
+The agent reads the tool description at connection time. If the examples say `db="knowledge_graph"`, the agent knows that bank exists without calling `fed_banks()` first. Match the examples to what's actually registered.
+
 ## Rules
 
 1. **Never raise from `search()`.** Return `[]` on failure. Set `self._status = BankStatus.DEGRADED`. Federation logs the warning and continues with other banks.
