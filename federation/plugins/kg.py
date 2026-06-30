@@ -124,8 +124,6 @@ class KGBankPlugin(BankPlugin):
         results: list[FederatedResult] = []
         for tier_idx, tier in enumerate(data.get("tiers", [])):
             for entity in tier.get("entities", []):
-                if len(results) >= limit:
-                    break
                 # Name matches score higher than observation-only matches
                 name_match = 1 if "name" in entity.get("matchedIn", []) else 0
                 obs_match = 1 if "observation" in entity.get("matchedIn", []) else 0
@@ -148,6 +146,11 @@ class KGBankPlugin(BankPlugin):
                         "matched_in": entity.get("matchedIn", []),
                     },
                 ))
+
+        # Sort by relevance descending, then truncate
+        results.sort(key=lambda r: -r.relevance)
+        if limit > 0:
+            results = results[:limit]
 
         self._status = BankStatus.HEALTHY
         return results

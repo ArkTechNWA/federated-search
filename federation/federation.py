@@ -78,33 +78,15 @@ class FederationEngine:
 
         return sorted(plugins, key=lambda p: p.priority)
 
-    def _distribute_limits(self, banks: list[BankPlugin], total_limit: int) -> dict[str, int]:
-        """Distribute result limit across banks proportionally by priority.
+    def _per_bank_fetch_limit(self, banks: list[BankPlugin], total_limit: int) -> int:
+        """Each bank fetches up to total_limit. Truncation happens after merge.
 
-        Higher priority (lower number) gets more slots.
+        Over-fetching is cheap. Under-fetching loses the best results.
         """
         if total_limit < 0:
-            return {b.id: 999 for b in banks}  # unlimited
-
-        if not banks:
-            return {}
-
-        # Inverse priority weights: priority 1 → weight 10, priority 99 → weight 1
-        weights = {b.id: max(1, 100 - b.priority) for b in banks}
-        total_weight = sum(weights.values())
-
-        limits = {}
-        remaining = total_limit
-        for i, bank in enumerate(banks):
-            if i == len(banks) - 1:
-                # Last bank gets remainder
-                limits[bank.id] = max(1, remaining)
-            else:
-                share = max(1, int(total_limit * weights[bank.id] / total_weight))
-                limits[bank.id] = share
-                remaining -= share
-
-        return limits
+            return 999  # unlimited
+        # Each bank gets the full limit — we trim after priority merge
+        return max(1, total_limit)
 
     async def search(self, request: SearchRequest) -> dict[str, Any]:
         """Execute federated search — fan-out to banks, merge results."""
@@ -118,12 +100,12 @@ class FederationEngine:
                 "hint": self._available_banks_hint(),
             }
 
-        limits = self._distribute_limits(banks, request.limit)
+        per_bank_limit = self._per_bank_fetch_limit(banks, request.limit)
 
         # Fan out — all banks in parallel
         tasks = {
             bank.id: asyncio.create_task(
-                bank.search(request.query, limits.get(bank.id, 5))
+                bank.search(request.query, per_bank_limit)
             )
             for bank in banks
         }
