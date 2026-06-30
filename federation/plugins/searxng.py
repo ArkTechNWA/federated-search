@@ -74,7 +74,7 @@ class SearXNGBankPlugin(BankPlugin):
             logger.warning("DeepSeek synthesis failed: %s", e)
             return None
 
-    async def search(self, query: str, limit: int = 10) -> list[FederatedResult]:
+    async def search(self, query: str, limit: int = 10, mode: str = "broad") -> list[FederatedResult]:
         client = await self._ensure_client()
 
         try:

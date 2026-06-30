@@ -42,6 +42,7 @@ async def fed_search(
     query: str,
     db: str | None = None,
     limit: int = 10,
+    mode: str = "broad",
 ) -> str:
     """Search across all subscribed memory banks.
 
@@ -53,6 +54,7 @@ async def fed_search(
               Omit to search all default banks.
               Example: db="knowledge_graph" or db="flex,web"
         limit: Max results to return. Default 10. Use -1 for unlimited.
+        mode: Search mode. "broad" (default), "exact" (quoted phrase), or "semantic" (meaning-based).
     """
     engine = _get_engine()
 
@@ -60,7 +62,7 @@ async def fed_search(
     if db:
         db_list = [b.strip() for b in db.split(",")]
 
-    request = SearchRequest(query=query, db=db_list, limit=limit)
+    request = SearchRequest(query=query, db=db_list, limit=limit, mode=mode)
     result = await engine.search(request)
     return format_results(result)
 

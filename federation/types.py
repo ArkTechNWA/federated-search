@@ -28,6 +28,7 @@ class BankConfig:
     cell: str | None = None          # flex cell name
     synthesis: bool = False          # searxng AI synthesis
     deepseek_api_key_env: str | None = None
+    min_relevance: float = 0.0      # results below this floor get cut
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -70,3 +71,4 @@ class SearchRequest:
     query: str
     db: list[str] | None = None  # None = all defaults
     limit: int = 10
+    mode: str = "broad"           # broad, exact, semantic

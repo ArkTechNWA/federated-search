@@ -113,9 +113,11 @@ class KGBankPlugin(BankPlugin):
                 return await self._call_tool(name, arguments, retry=False)
             raise
 
-    async def search(self, query: str, limit: int = 10) -> list[FederatedResult]:
+    async def search(self, query: str, limit: int = 10, mode: str = "broad") -> list[FederatedResult]:
         try:
-            data = await self._call_tool("search_nodes", {"query": query})
+            # In exact mode, wrap in quotes for FTS5 phrase matching
+            search_query = '"' + query + '"' if mode == "exact" else query
+            data = await self._call_tool("search_nodes", {"query": search_query})
         except Exception as e:
             logger.warning("KG search failed for bank %s: %s", self.id, e)
             self._status = BankStatus.DEGRADED

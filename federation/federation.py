@@ -11,6 +11,7 @@ from federation.plugins.base import BankPlugin
 from federation.plugins.flex import FlexBankPlugin
 from federation.plugins.kg import KGBankPlugin
 from federation.plugins.searxng import SearXNGBankPlugin
+from federation.filters import apply_adaptive_count, apply_confidence_floor, validate_query
 from federation.types import BankConfig, BankInfo, BankStatus, FederatedResult, SearchRequest
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,17 @@ class FederationEngine:
 
     async def search(self, request: SearchRequest) -> dict[str, Any]:
         """Execute federated search — fan-out to banks, merge results."""
+        # Validate query
+        error = validate_query(request.query)
+        if error:
+            return {
+                "query": request.query,
+                "results": [],
+                "banks_queried": [],
+                "error": error,
+                "hint": self._available_banks_hint(),
+            }
+
         banks = self._resolve_banks(request.db)
 
         if not banks:
@@ -105,7 +117,7 @@ class FederationEngine:
         # Fan out — all banks in parallel
         tasks = {
             bank.id: asyncio.create_task(
-                bank.search(request.query, per_bank_limit)
+                bank.search(request.query, per_bank_limit, request.mode)
             )
             for bank in banks
         }
@@ -151,9 +163,36 @@ class FederationEngine:
         # Sort: primary by priority (lower = better), secondary by relevance (higher = better)
         all_results.sort(key=lambda r: (r.priority, -r.relevance))
 
-        # Trim to total limit
-        if request.limit > 0:
-            all_results = all_results[:request.limit]
+        # Apply confidence floor — cut noise
+        all_results, floor_cut = apply_confidence_floor(all_results)
+
+        # Apply adaptive count — trim weak tail when strong results exist
+        all_results, adaptive_cut = apply_adaptive_count(all_results)
+
+        total_cut = floor_cut + adaptive_cut
+
+        # Trim to total limit with minimum representation per bank
+        if request.limit > 0 and len(all_results) > request.limit:
+            # Guarantee each bank gets at least 1 slot (if it has results)
+            banks_with_results = list({r.bank for r in all_results})
+            if len(banks_with_results) > 1 and request.limit >= len(banks_with_results):
+                # Reserve 1 slot per bank, fill remaining by priority+relevance
+                reserved: list[FederatedResult] = []
+                remaining: list[FederatedResult] = []
+                seen_banks: set[str] = set()
+                for r in all_results:
+                    if r.bank not in seen_banks:
+                        reserved.append(r)
+                        seen_banks.add(r.bank)
+                    else:
+                        remaining.append(r)
+                # Fill remaining slots from the sorted remainder
+                fill_count = request.limit - len(reserved)
+                all_results = reserved + remaining[:fill_count]
+                # Re-sort so output is ordered correctly
+                all_results.sort(key=lambda r: (r.priority, -r.relevance))
+            else:
+                all_results = all_results[:request.limit]
 
         response: dict[str, Any] = {
             "query": request.query,
@@ -161,6 +200,9 @@ class FederationEngine:
             "banks_queried": banks_queried,
             "total": len(all_results),
         }
+
+        if total_cut > 0:
+            response["omitted"] = f"{total_cut} low-confidence results omitted. Use limit=-1 to see all."
 
         # Add hint about available banks if using defaults
         if request.db is None:

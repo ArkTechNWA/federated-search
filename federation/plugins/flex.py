@@ -19,7 +19,7 @@ from federation.types import BankConfig, BankStatus, FederatedResult
 logger = logging.getLogger(__name__)
 
 # Flex prepends a header like "[3 rows, ~712 tok]\n" before JSON
-_FLEX_HEADER_RE = re.compile(r"^\[\d+ rows?, ~[\d.]+ tok\]\n", re.MULTILINE)
+_FLEX_HEADER_RE = re.compile(r"^\[\d+ rows?, ~[\d.]+[KMB]? tok\]\n", re.MULTILINE)
 
 
 class FlexBankPlugin(BankPlugin):
@@ -108,19 +108,41 @@ class FlexBankPlugin(BankPlugin):
         parsed = self._parse_sse(resp.text)
         return parsed["result"]["content"][0]["text"]
 
-    async def search(self, query: str, limit: int = 10) -> list[FederatedResult]:
+    async def search(self, query: str, limit: int = 10, mode: str = "broad") -> list[FederatedResult]:
         cell = self.config.cell or "claude_code"
 
         # Escape single quotes in query for SQL safety
         safe_query = query.replace("'", "''")
 
-        flex_query = (
-            f"SELECT k.id, k.rank, k.snippet, c.session_id, c.position, "
-            f"substr(c.content, 1, 300) AS preview "
-            f"FROM keyword('{safe_query}', 'SELECT id FROM chunks') k "
-            f"JOIN chunks c ON c.id = k.id "
-            f"LIMIT {limit}"
-        )
+        if mode == "semantic":
+            # Semantic search via vec_ops — meaning-based, not term-based
+            flex_query = (
+                f"SELECT v.id, v.score AS rank, '' AS snippet, c.session_id, c.position, "
+                f"substr(c.content, 1, 300) AS preview "
+                f"FROM vec_ops('similar:{safe_query}', 'SELECT id FROM chunks') v "
+                f"JOIN chunks c ON c.id = v.id "
+                f"LIMIT {limit}"
+            )
+        elif mode == "exact":
+            # Exact phrase via keyword with quoted phrase
+            quoted = '"' + safe_query + '"'
+            kw_inner = quoted.replace("'", "''")
+            flex_query = (
+                f"SELECT k.id, k.rank, k.snippet, c.session_id, c.position, "
+                f"substr(c.content, 1, 300) AS preview "
+                f"FROM keyword('{kw_inner}', 'SELECT id FROM chunks') k "
+                f"JOIN chunks c ON c.id = k.id "
+                f"LIMIT {limit}"
+            )
+        else:
+            # Broad keyword search (default)
+            flex_query = (
+                f"SELECT k.id, k.rank, k.snippet, c.session_id, c.position, "
+                f"substr(c.content, 1, 300) AS preview "
+                f"FROM keyword('{safe_query}', 'SELECT id FROM chunks') k "
+                f"JOIN chunks c ON c.id = k.id "
+                f"LIMIT {limit}"
+            )
 
         try:
             raw = await self._call_flex(f"!{flex_query}", cell)
