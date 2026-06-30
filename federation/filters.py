@@ -64,3 +64,32 @@ def apply_adaptive_count(
     threshold = best * 0.4
     kept = [r for r in results if r.relevance >= threshold]
     return kept, len(results) - len(kept)
+
+
+# Pattern for SCREAMING_SNAKE_CASE entity names (3+ chars, at least one underscore)
+import re
+_ENTITY_NAME_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9]+(?:_[A-Z0-9]+)+)(?![A-Za-z0-9_])")
+
+
+def annotate_cross_bank_overlap(results: list[FederatedResult]) -> None:
+    """Annotate flex results that reference KG entities already in the results.
+
+    Adds overlaps_with to metadata. Does NOT suppress or demote.
+    The consuming agent decides whether the flex context adds value.
+    Modifies results in place.
+    """
+    # Collect KG entity names
+    kg_entities = {r.title for r in results if r.source_type == "entity"}
+    if not kg_entities:
+        return
+
+    for r in results:
+        if r.source_type != "chunk":
+            continue
+
+        # Find SCREAMING_SNAKE_CASE names in the snippet
+        found_in_snippet = _ENTITY_NAME_RE.findall(r.snippet)
+        overlaps = [name for name in found_in_snippet if name in kg_entities]
+
+        if overlaps:
+            r.metadata["overlaps_with"] = list(set(overlaps))

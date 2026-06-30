@@ -12,6 +12,13 @@ agents:
         priority: 1
         default: true
         url: "http://127.0.0.1:3101/mcp"
+        domain_map:
+          infrastructure: NETWORK_INFRASTRUCTURE_INDEX
+          api: API_REFERENCE_INDEX
+          config: CONFIGURATION_INDEX
+          ops: OPERATIONAL_PROCEDURES_INDEX
+          docs: DOCUMENTATION_INDEX
+          projects: PROJECT_SKILLS_REGISTRY
         auth: "Bearer ${KG_AUTH_TOKEN}"
       - id: flex
         type: flex

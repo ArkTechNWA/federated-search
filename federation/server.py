@@ -43,6 +43,7 @@ async def fed_search(
     db: str | None = None,
     limit: int = 10,
     mode: str = "broad",
+    domain: str | None = None,
 ) -> str:
     """Search across all subscribed memory banks.
 
@@ -55,6 +56,7 @@ async def fed_search(
               Example: db="knowledge_graph" or db="flex,web"
         limit: Max results to return. Default 10. Use -1 for unlimited.
         mode: Search mode. "broad" (default), "exact" (quoted phrase), or "semantic" (meaning-based).
+        domain: Optional. Pre-filter KG results to a specific index. Example: domain="infrastructure"
     """
     engine = _get_engine()
 
@@ -62,7 +64,7 @@ async def fed_search(
     if db:
         db_list = [b.strip() for b in db.split(",")]
 
-    request = SearchRequest(query=query, db=db_list, limit=limit, mode=mode)
+    request = SearchRequest(query=query, db=db_list, limit=limit, mode=mode, domain=domain)
     result = await engine.search(request)
     return format_results(result)
 

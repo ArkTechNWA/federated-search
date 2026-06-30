@@ -108,7 +108,7 @@ class FlexBankPlugin(BankPlugin):
         parsed = self._parse_sse(resp.text)
         return parsed["result"]["content"][0]["text"]
 
-    async def search(self, query: str, limit: int = 10, mode: str = "broad") -> list[FederatedResult]:
+    async def search(self, query: str, limit: int = 10, mode: str = "broad", domain: str | None = None) -> list[FederatedResult]:
         cell = self.config.cell or "claude_code"
 
         # Escape single quotes in query for SQL safety

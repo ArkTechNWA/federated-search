@@ -32,7 +32,7 @@ class BankPlugin(ABC):
         return self._status
 
     @abstractmethod
-    async def search(self, query: str, limit: int = 10, mode: str = "broad") -> list[FederatedResult]:
+    async def search(self, query: str, limit: int = 10, mode: str = "broad", domain: str | None = None) -> list[FederatedResult]:
         """Translate a fed_search query into bank-native queries and return results."""
 
     @abstractmethod

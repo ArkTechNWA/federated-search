@@ -72,3 +72,4 @@ class SearchRequest:
     db: list[str] | None = None  # None = all defaults
     limit: int = 10
     mode: str = "broad"           # broad, exact, semantic
+    domain: str | None = None    # pre-filter to a KG index alias

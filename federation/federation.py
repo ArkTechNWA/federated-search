@@ -11,7 +11,7 @@ from federation.plugins.base import BankPlugin
 from federation.plugins.flex import FlexBankPlugin
 from federation.plugins.kg import KGBankPlugin
 from federation.plugins.searxng import SearXNGBankPlugin
-from federation.filters import apply_adaptive_count, apply_confidence_floor, validate_query
+from federation.filters import annotate_cross_bank_overlap, apply_adaptive_count, apply_confidence_floor, validate_query
 from federation.types import BankConfig, BankInfo, BankStatus, FederatedResult, SearchRequest
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ class FederationEngine:
         # Fan out — all banks in parallel
         tasks = {
             bank.id: asyncio.create_task(
-                bank.search(request.query, per_bank_limit, request.mode)
+                bank.search(request.query, per_bank_limit, request.mode, request.domain)
             )
             for bank in banks
         }
@@ -162,6 +162,9 @@ class FederationEngine:
 
         # Sort: primary by priority (lower = better), secondary by relevance (higher = better)
         all_results.sort(key=lambda r: (r.priority, -r.relevance))
+
+        # Annotate cross-bank overlaps (flex chunks referencing KG entities)
+        annotate_cross_bank_overlap(all_results)
 
         # Apply confidence floor — cut noise
         all_results, floor_cut = apply_confidence_floor(all_results)

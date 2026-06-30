@@ -113,8 +113,30 @@ class KGBankPlugin(BankPlugin):
                 return await self._call_tool(name, arguments, retry=False)
             raise
 
-    async def search(self, query: str, limit: int = 10, mode: str = "broad") -> list[FederatedResult]:
+    async def search(self, query: str, limit: int = 10, mode: str = "broad", domain: str | None = None) -> list[FederatedResult]:
         try:
+            # Resolve domain to index members if specified
+            domain_members: set[str] | None = None
+            if domain:
+                domain_map = self.config.extra.get("domain_map", {})
+                index_name = domain_map.get(domain)
+                if not index_name:
+                    logger.warning("Unknown domain '%s' for bank %s. Available: %s",
+                                   domain, self.id, list(domain_map.keys()))
+                    return []
+                # Get index members via open_nodes
+                try:
+                    index_data = await self._call_tool("open_nodes", {"names": [index_name]})
+                    # Members are entities with indexed_in relations TO this index
+                    relations = index_data.get("relations", [])
+                    domain_members = {
+                        r["from"] for r in relations
+                        if r.get("relationType") == "indexed_in" and r.get("to") == index_name
+                    }
+                except Exception as e:
+                    logger.warning("Failed to resolve domain '%s': %s", domain, e)
+                    return []
+
             # In exact mode, wrap in quotes for FTS5 phrase matching
             search_query = '"' + query + '"' if mode == "exact" else query
             data = await self._call_tool("search_nodes", {"query": search_query})
@@ -148,6 +170,10 @@ class KGBankPlugin(BankPlugin):
                         "matched_in": entity.get("matchedIn", []),
                     },
                 ))
+
+        # Filter by domain membership if specified
+        if domain_members is not None:
+            results = [r for r in results if r.title in domain_members]
 
         # Sort by relevance descending, then truncate
         results.sort(key=lambda r: -r.relevance)
