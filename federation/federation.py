@@ -10,6 +10,8 @@ from federation.config import AgentConfig
 from federation.plugins.base import BankPlugin
 from federation.plugins.flex import FlexBankPlugin
 from federation.plugins.kg import KGBankPlugin
+from federation.plugins.gmail import GmailPlugin
+from federation.plugins.google_calendar import GoogleCalendarPlugin
 from federation.plugins.searxng import SearXNGBankPlugin
 from federation.filters import annotate_cross_bank_overlap, apply_adaptive_count, apply_confidence_floor, validate_query
 from federation.types import BankConfig, BankInfo, BankStatus, FederatedResult, SearchRequest
@@ -21,6 +23,8 @@ PLUGIN_REGISTRY: dict[str, type[BankPlugin]] = {
     "kg": KGBankPlugin,
     "flex": FlexBankPlugin,
     "searxng": SearXNGBankPlugin,
+    "google_calendar": GoogleCalendarPlugin,
+    "gmail": GmailPlugin,
 }
 
 
