@@ -12,7 +12,8 @@ from federation.types import SearchRequest
 
 async def main():
     config = FederationConfig.load("config.yaml")
-    agent = config.agents["johnny5"]
+    agent_name = list(config.agents.keys())[0]
+    agent = config.agents[agent_name]
     engine = FederationEngine(agent)
 
     print("=== Initializing Federation Engine ===")

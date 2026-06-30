@@ -1,8 +1,9 @@
 # Federation config — one file defines all bank routing
 # Priority order: lower number = higher priority in results
+# Copy to config.local.yaml and fill in real values
 
 agents:
-  johnny5:
+  default:
     port: 4001
     banks:
       - id: knowledge_graph
@@ -12,14 +13,11 @@ agents:
         priority: 1
         default: true
         url: "http://127.0.0.1:3101/mcp"
-        domain_map:
-          infrastructure: NETWORK_INFRASTRUCTURE_INDEX
-          api: API_REFERENCE_INDEX
-          config: CONFIGURATION_INDEX
-          ops: OPERATIONAL_PROCEDURES_INDEX
-          docs: DOCUMENTATION_INDEX
-          projects: PROJECT_SKILLS_REGISTRY
         auth: "Bearer ${KG_AUTH_TOKEN}"
+        domain_map:
+          # Map short aliases to KG index entity names
+          # infrastructure: MY_INFRASTRUCTURE_INDEX
+          # api: MY_API_INDEX
       - id: flex
         type: flex
         label: "Session History"
@@ -34,6 +32,6 @@ agents:
         description: "SearXNG metasearch with optional AI synthesis"
         priority: 99
         default: false
-        url: "http://100.100.2.147:8080"
+        url: "http://your-searxng-host:8080"
         synthesis: true
         deepseek_api_key_env: "DEEPSEEK_API_KEY"

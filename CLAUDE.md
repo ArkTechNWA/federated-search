@@ -7,8 +7,8 @@ One query, all knowledge. A federation layer that sits in front of multiple memo
 ```bash
 source .venv/bin/activate
 python test_live.py                                    # Integration test against live services
-python -m federation.server --agent johnny5             # stdio mode
-python -m federation.server --agent johnny5 --http --port 4001  # HTTP mode
+python -m federation.server --agent my_agent             # stdio mode
+python -m federation.server --agent my_agent --http --port 4001  # HTTP mode
 ```
 
 ## Architecture
