@@ -55,14 +55,11 @@ class KGBankPlugin(BankPlugin):
             self._client = httpx.AsyncClient(timeout=30.0)
         return self._client
 
-    async def _ensure_session(self) -> None:
-        """Initialize MCP session if needed."""
-        if self._session_id:
-            return
-
+    async def _create_session(self) -> None:
+        """Initialize a fresh MCP session."""
         client = await self._ensure_client()
+        self._session_id = None  # clear stale session
 
-        # Step 1: initialize
         resp = await client.post(
             self.config.url,
             headers=self._headers(),
@@ -80,33 +77,41 @@ class KGBankPlugin(BankPlugin):
         resp.raise_for_status()
         self._session_id = resp.headers.get("mcp-session-id")
 
-        # Step 2: initialized notification
         await client.post(
             self.config.url,
             headers=self._headers(),
             json={"jsonrpc": "2.0", "method": "notifications/initialized"},
         )
 
-    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Call an MCP tool and return the parsed result."""
-        await self._ensure_session()
+    async def _call_tool(self, name: str, arguments: dict[str, Any], retry: bool = True) -> Any:
+        """Call an MCP tool. Re-initializes session on failure."""
+        if not self._session_id:
+            await self._create_session()
+
         client = await self._ensure_client()
 
-        resp = await client.post(
-            self.config.url,
-            headers=self._headers(),
-            json={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {"name": name, "arguments": arguments},
-                "id": self._next_id(),
-            },
-        )
-        resp.raise_for_status()
-
-        sse = self._parse_sse(resp.text)
-        content_text = sse["result"]["content"][0]["text"]
-        return json.loads(content_text)
+        try:
+            resp = await client.post(
+                self.config.url,
+                headers=self._headers(),
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments},
+                    "id": self._next_id(),
+                },
+            )
+            resp.raise_for_status()
+            sse = self._parse_sse(resp.text)
+            content_text = sse["result"]["content"][0]["text"]
+            return json.loads(content_text)
+        except Exception:
+            if retry:
+                # Session likely expired — re-init and retry once
+                logger.info("KG session expired for bank %s, re-initializing", self.id)
+                await self._create_session()
+                return await self._call_tool(name, arguments, retry=False)
+            raise
 
     async def search(self, query: str, limit: int = 10) -> list[FederatedResult]:
         try:
@@ -117,22 +122,18 @@ class KGBankPlugin(BankPlugin):
             return []
 
         results: list[FederatedResult] = []
-        total_tiers = len(data.get("tiers", []))
-
         for tier_idx, tier in enumerate(data.get("tiers", [])):
-            match_count = tier.get("matchCount", 0)
             for entity in tier.get("entities", []):
                 if len(results) >= limit:
                     break
-                # Higher match count + earlier tier = higher relevance
                 # Name matches score higher than observation-only matches
                 name_match = 1 if "name" in entity.get("matchedIn", []) else 0
                 obs_match = 1 if "observation" in entity.get("matchedIn", []) else 0
                 type_match = 1 if "type" in entity.get("matchedIn", []) else 0
                 base = 0.3 + name_match * 0.4 + obs_match * 0.15 + type_match * 0.1
-                # Penalize lower tiers slightly
                 tier_penalty = tier_idx * 0.05
                 relevance = min(1.0, max(0.1, base - tier_penalty))
+
                 results.append(FederatedResult(
                     bank=self.id,
                     bank_label=self.config.label,
@@ -154,7 +155,6 @@ class KGBankPlugin(BankPlugin):
     async def health_check(self) -> BankStatus:
         try:
             client = await self._ensure_client()
-            # Hit the health endpoint (not MCP)
             base = self.config.url.replace("/mcp", "")
             resp = await client.get(f"{base}/health")
             if resp.status_code == 200:
@@ -166,7 +166,7 @@ class KGBankPlugin(BankPlugin):
         return self._status
 
     async def initialize(self) -> None:
-        await self._ensure_session()
+        await self._create_session()
 
     async def shutdown(self) -> None:
         if self._client:
