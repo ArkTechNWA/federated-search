@@ -20,7 +20,7 @@ from federation.types import SearchRequest
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("federation")
 
-# Globals — set during lifespan
+# Globals — set during startup
 _engine: FederationEngine | None = None
 _agent_name: str = "unknown"
 
@@ -33,11 +33,7 @@ def _get_engine() -> FederationEngine:
 
 # --- MCP Server ---
 
-mcp = FastMCP(
-    "federated-search",
-    version="0.1.0",
-    description="Federated memory search — one query, all knowledge",
-)
+mcp = FastMCP("federated-search")
 
 
 @mcp.tool()
@@ -59,7 +55,6 @@ async def fed_search(
     """
     engine = _get_engine()
 
-    # Parse db argument
     db_list: list[str] | None = None
     if db:
         db_list = [b.strip() for b in db.split(",")]
@@ -101,8 +96,8 @@ def main():
                         help="Agent name (must match a key in config.agents)")
     parser.add_argument("--http", action="store_true",
                         help="Use Streamable HTTP transport")
-    parser.add_argument("--port", type=int, default=4001,
-                        help="HTTP port (default: from agent config or 4001)")
+    parser.add_argument("--port", type=int, default=None,
+                        help="HTTP port (default: from agent config)")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -118,31 +113,25 @@ def main():
         sys.exit(1)
 
     agent_config = config.agents[args.agent]
-    global _agent_name
+    global _agent_name, _engine
     _agent_name = args.agent
 
-    port = args.port or agent_config.port
-
-    # Initialize engine
-    global _engine
     engine = FederationEngine(agent_config)
+    _engine = engine
 
-    async def run():
-        global _engine
-        _engine = engine
-        await engine.initialize()
-        logger.info("Federation engine ready for agent '%s' with %d banks",
-                     args.agent, len(engine._plugins))
+    # Initialize engine synchronously before starting MCP
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(engine.initialize())
+    loop.close()
 
-        try:
-            if args.http:
-                mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
-            else:
-                mcp.run(transport="stdio")
-        finally:
-            await engine.shutdown()
+    logger.info("Federation engine ready for agent '%s' with %d banks",
+                 args.agent, len(engine._plugins))
 
-    asyncio.run(run())
+    if args.http:
+        port = args.port or agent_config.port
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
