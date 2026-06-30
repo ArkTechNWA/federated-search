@@ -15,6 +15,7 @@ from mcp.server.fastmcp import FastMCP
 
 from federation.config import FederationConfig
 from federation.federation import FederationEngine
+from federation.formatter import format_banks, format_results
 from federation.types import SearchRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -61,7 +62,7 @@ async def fed_search(
 
     request = SearchRequest(query=query, db=db_list, limit=limit)
     result = await engine.search(request)
-    return json.dumps(result, indent=2)
+    return format_results(result)
 
 
 @mcp.tool()
@@ -72,18 +73,7 @@ async def fed_banks() -> str:
     """
     engine = _get_engine()
     banks = await engine.check_all_health()
-    return json.dumps([
-        {
-            "id": b.id,
-            "type": b.type,
-            "label": b.label,
-            "description": b.description,
-            "priority": b.priority,
-            "default": b.default,
-            "status": b.status.value,
-        }
-        for b in banks
-    ], indent=2)
+    return format_banks([{"id": b.id, "type": b.type, "label": b.label, "description": b.description, "priority": b.priority, "default": b.default, "status": b.status.value} for b in banks])
 
 
 # --- Entry point ---
